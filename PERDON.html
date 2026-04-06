@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Campo de Girasoles Infinito - Día</title>
+    <style>
+        :root {
+            --glass: rgba(255, 255, 255, 0.15);
+            --glass-border: rgba(255, 255, 255, 0.4);
+            --gold: #FFD700;
+            --sky-blue: #87CEEB;
+        }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #4ca1af; font-family: 'Georgia', serif; }
+        canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: flex; justify-content: center; align-items: center; pointer-events: none; }
+        .card-container { position: relative; width: 90%; max-width: 440px; height: 550px; perspective: 2000px; }
+        .card {
+            position: absolute; width: 100%; height: 100%; background: var(--glass); backdrop-filter: blur(25px) saturate(120%); -webkit-backdrop-filter: blur(25px);
+            border-radius: 40px; border: 1px solid var(--glass-border); box-shadow: 0 40px 80px rgba(0,0,0,0.2);
+            padding: 40px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; color: #1a1a1a;
+            transition: all 0.9s cubic-bezier(0.2, 1, 0.3, 1); opacity: 0; pointer-events: none; transform: rotateY(15deg) translateZ(-150px);
+        }
+        .card.active { opacity: 1; pointer-events: auto; transform: rotateY(0) translateZ(0); }
+        .card.prev { transform: translateX(-140%) rotateY(-25deg); opacity: 0; }
+        .card.next { transform: translateX(140%) rotateY(25deg); opacity: 0; }
+        .card h2 { font-size: 2.2rem; margin-bottom: 15px; color: #d48806; text-shadow: 0 2px 4px rgba(255,255,255,0.5); font-style: italic; }
+        .card p { font-size: 1.2rem; line-height: 1.7; color: #2c3e50; font-weight: 400; }
+        .final-img { width: 100%; height: 200px; border-radius: 20px; margin-top: 20px; object-fit: cover; border: 2px solid var(--glass-border); }
+        .nav-hint { position: absolute; bottom: 30px; color: #fff; font-size: 0.75rem; letter-spacing: 4px; text-transform: uppercase; opacity: 0.8; text-shadow: 0 2px 4px rgba(0,0,0,0.3); animation: float 3s ease-in-out infinite; }
+        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+    </style>
+</head>
+<body>
+<canvas id="fieldCanvas"></canvas>
+<div id="ui-layer">
+    <div class="card-container" id="carousel"></div>
+    <div class="nav-hint">Desliza para caminar bajo el sol</div>
+</div>
+
+<script>
+const messages = [
+    { t: "Un nuevo día", m: "Como este campo iluminado, quiero que nuestra relación brille de nuevo. Siento mucho lo ocurrido y quiero remediarlo." },
+    { t: "Toda mi atención", m: "Me distraje, pero hoy veo claro: tú eres mi sol. Perdóname por no haber estado presente cuando me necesitabas." },
+    { t: "Juntos al horizonte", m: "Este campo no tiene fin, igual que mi compromiso contigo. Prometo cuidar cada detalle de nosotros." },
+    { t: "Gracias por tu luz", m: "Eres la razón por la que todo florece a mi alrededor. Gracias por tu paciencia y por tu amor infinito." },
+    { t: "Nuestra alegría", m: "Caminemos bajo este cielo claro, dejando atrás las sombras. Eres lo más valioso que tengo." },
+    { t: "Te amo siempre", m: "Espero que este paisaje te recuerde lo hermosa que es la vida cuando estamos bien. ¿Me perdonas?", img: "https://via.placeholder.com/600x400/fff/d48806?text=Nuestra+Foto" }
+];
+
+const canvas = document.getElementById('fieldCanvas');
+const ctx = canvas.getContext('2d');
+let width, height, flowers = [], clouds = [], grassBlades = [], scrollX = 0, targetScrollX = 0;
+let wind = 0.05, windTarget = 0.05;
+
+class Cloud {
+    constructor() {
+        this.reset(true);
+    }
+    reset(initial = false) {
+        this.w = 150 + Math.random() * 250;
+        this.h = this.w * 0.4;
+        this.x = initial ? Math.random() * width : width + this.w;
+        this.y = Math.random() * (height * 0.35);
+        this.speed = 0.15 + Math.random() * 0.35;
+        this.opacity = 0.25 + Math.random() * 0.45;
+    }
+    draw() {
+        this.x -= this.speed;
+        if (this.x < -this.w) this.reset();
+        ctx.save();
+        ctx.filter = 'blur(45px)';
+        ctx.fillStyle = `rgba(255, 255, 255, ${this.opacity})`;
+        ctx.beginPath();
+        ctx.ellipse(this.x, this.y, this.w, this.h, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+class Grass {
+    constructor() {
+        this.x = Math.random() * 7000;
+        this.yRel = Math.random();
+        this.h = 10 + Math.random() * 20;
+        this.color = Math.random() > 0.5 ? '#3a7231' : '#4a8c3a';
+    }
+    draw() {
+        const horizon = height * 0.42;
+        const fieldDepth = height * 0.58;
+        let screenX = (this.x - scrollX * (0.1 + this.yRel * 0.9)) % 6500;
+        if (screenX < -50) screenX += 6500;
+        const screenY = horizon + (this.yRel * fieldDepth);
+        const scale = 0.1 + (this.yRel * 1.5);
+        const sway = Math.sin(Date.now() * 0.002 + this.x) * 5;
+
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = 1 * scale;
+        ctx.beginPath();
+        ctx.moveTo(screenX, screenY);
+        ctx.lineTo(screenX + sway, screenY - this.h * scale);
+        ctx.stroke();
+    }
+}
+
+class Sunflower {
+    constructor() {
+        this.x = Math.random() * 7000;
+        this.yRel = Math.pow(Math.random(), 1.8); 
+        this.seed = Math.random() * 100;
+        this.leaves = 4 + Math.floor(Math.random() * 3);
+    }
+
+    draw() {
+        const horizon = height * 0.42;
+        const fieldDepth = height * 0.58;
+        let screenX = (this.x - scrollX * (0.1 + this.yRel * 0.9)) % 6500;
+        if (screenX < -200) screenX += 6500;
+        
+        const screenY = horizon + (this.yRel * fieldDepth);
+        const scale = 0.07 + (this.yRel * 2.3); 
+        const sway = Math.sin(Date.now() * 0.0012 + this.seed) * (wind + this.yRel * 0.1);
+        
+        ctx.save();
+        ctx.translate(screenX, screenY);
+        ctx.scale(scale, scale);
+
+        ctx.strokeStyle = '#2d5a27';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(sway * 30, -30, sway * 50, -100);
+        ctx.stroke();
+
+        ctx.fillStyle = '#3a7231';
+        for (let i = 0; i < this.leaves; i++) {
+            const hY = -15 - (i * 18);
+            const side = i % 2 === 0 ? 1 : -1;
+            ctx.save();
+            ctx.translate(sway * (hY/-3), hY);
+            ctx.rotate(side * 0.8 + sway);
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 18, 8, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        ctx.translate(sway * 50, -100);
+        ctx.rotate(sway * 0.1);
+
+        for (let i = 0; i < 20; i++) {
+            ctx.rotate((Math.PI * 2) / 20);
+            const grad = ctx.createLinearGradient(0, 0, 45, 0);
+            grad.addColorStop(0, '#f39c12');
+            grad.addColorStop(0.6, '#f1c40f');
+            grad.addColorStop(1, '#fff176');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.bezierCurveTo(18, -10, 42, -5, 48, 0);
+            ctx.bezierCurveTo(42, 5, 18, 10, 0, 0);
+            ctx.fill();
+        }
+
+        const centerGrad = ctx.createRadialGradient(-2, -2, 0, 0, 0, 20);
+        centerGrad.addColorStop(0, '#5d4037');
+        centerGrad.addColorStop(1, '#3e2723');
+        ctx.fillStyle = centerGrad;
+        ctx.beginPath();
+        ctx.arc(0, 0, 19, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+    }
+}
+
+function drawAtmosphere() {
+    // Cielo
+    const sky = ctx.createLinearGradient(0, 0, 0, height * 0.42);
+    sky.addColorStop(0, '#4facfe'); 
+    sky.addColorStop(0.8, '#87CEEB'); 
+    sky.addColorStop(1, '#ffffff'); 
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, width, height * 0.42);
+
+    // Suelo Verde con variación
+    const ground = ctx.createLinearGradient(0, height * 0.42, 0, height);
+    ground.addColorStop(0, '#5a8c42'); // Horizonte verde suave
+    ground.addColorStop(0.5, '#4caf50'); // Verde medio
+    ground.addColorStop(1, '#2e7d32'); // Verde intenso primer plano
+    ctx.fillStyle = ground;
+    ctx.fillRect(0, height * 0.42, width, height * 0.58);
+
+    // Rayos de sol
+    ctx.save();
+    ctx.translate(width * 0.2, -100);
+    const rayCount = 10;
+    for(let i=0; i < rayCount; i++) {
+        const rayGrad = ctx.createLinearGradient(0,0, 0, height);
+        rayGrad.addColorStop(0, 'rgba(255, 255, 255, 0.12)');
+        rayGrad.addColorStop(1, 'transparent');
+        ctx.rotate(Math.PI / 12);
+        ctx.fillStyle = rayGrad;
+        ctx.beginPath();
+        ctx.moveTo(0,0);
+        ctx.lineTo(-60, height * 1.5);
+        ctx.lineTo(60, height * 1.5);
+        ctx.fill();
+    }
+    ctx.restore();
+
+    clouds.forEach(c => c.draw());
+}
+
+function init() {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+    
+    flowers = Array.from({length: 650}, () => new Sunflower());
+    clouds = Array.from({length: 8}, () => new Cloud());
+    grassBlades = Array.from({length: 400}, () => new Grass());
+    
+    const carousel = document.getElementById('carousel');
+    carousel.innerHTML = '';
+    messages.forEach((m, i) => {
+        const div = document.createElement('div');
+        div.className = `card ${i === 0 ? 'active' : 'next'}`;
+        div.innerHTML = `<h2>${m.t}</h2><p>${m.m}</p>${m.img ? `<img src="${m.img}" class="final-img" alt="Foto">` : ''}`;
+        carousel.appendChild(div);
+    });
+}
+
+function render() {
+    drawAtmosphere();
+    
+    wind += (windTarget - wind) * 0.01;
+    if (Math.random() > 0.99) windTarget = 0.05 + Math.random() * 0.1;
+
+    scrollX += (targetScrollX - scrollX) * 0.06;
+
+    // Dibujar pasto antes que flores
+    grassBlades.forEach(g => g.draw());
+
+    // Dibujar girasoles ordenados por profundidad
+    flowers.sort((a,b) => a.yRel - b.yRel).forEach(f => f.draw());
+
+    requestAnimationFrame(render);
+}
+
+let currentIdx = 0;
+function navigate(dir) {
+    const cards = document.querySelectorAll('.card');
+    if ((dir === 1 && currentIdx < messages.length - 1) || (dir === -1 && currentIdx > 0)) {
+        cards[currentIdx].className = dir === 1 ? 'card prev' : 'card next';
+        currentIdx += dir;
+        cards[currentIdx].className = 'card active';
+        targetScrollX = currentIdx * (width * 0.8);
+    }
+}
+
+let startX = 0;
+window.addEventListener('touchstart', e => startX = e.touches[0].clientX);
+window.addEventListener('touchend', e => {
+    const diff = startX - e.changedTouches[0].clientX;
+    if (Math.abs(diff) > 60) navigate(diff > 0 ? 1 : -1);
+});
+window.addEventListener('mousedown', e => startX = e.clientX);
+window.addEventListener('mouseup', e => {
+    const diff = startX - e.clientX;
+    if (Math.abs(diff) > 60) navigate(diff > 0 ? 1 : -1);
+});
+window.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight') navigate(1);
+    if (e.key === 'ArrowLeft') navigate(-1);
+});
+
+window.addEventListener('resize', init);
+init();
+render();
+</script>
+</body>
+</html>
